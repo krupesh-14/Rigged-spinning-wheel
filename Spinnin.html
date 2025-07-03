@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rigged Spinning Wheel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for the entries list */
+        #entries-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        #entries-list::-webkit-scrollbar-track {
+            background: #2d3748; /* gray-800 */
+        }
+        #entries-list::-webkit-scrollbar-thumb {
+            background: #4a5568; /* gray-600 */
+            border-radius: 4px;
+        }
+        #entries-list::-webkit-scrollbar-thumb:hover {
+            background: #718096; /* gray-500 */
+        }
+        /* Custom styles for the spin button to have a nice gradient and shadow */
+        #spin-button {
+            background: linear-gradient(145deg, #2d3748, #1a202c);
+            box-shadow: 5px 5px 15px #1a202c, -5px -5px 15px #2d3748;
+            transition: all 0.2s ease-in-out;
+        }
+        #spin-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        #spin-button:not(:disabled):active {
+            box-shadow: inset 5px 5px 10px #1a202c, inset -5px -5px 10px #2d3748;
+            transform: scale(0.95);
+        }
+        /* Style for the pointer */
+        #pointer {
+            filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.5));
+        }
+        /* Animation for winner modal */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white antialiased">
+
+    <div id="app" class="container mx-auto p-4 flex flex-col lg:flex-row items-start gap-8 min-h-screen">
+
+        <!-- Left Panel: Controls -->
+        <div class="w-full lg:w-1/3 bg-gray-800 p-6 rounded-2xl shadow-2xl border border-gray-700">
+            <h1 class="text-3xl font-black mb-2 text-cyan-400">Spinning Wheel</h1>
+            <p class="text-gray-400 mb-6">Add your options below and give it a spin!</p>
+
+            <!-- Input Form -->
+            <form id="entry-form" class="flex gap-2 mb-4">
+                <input type="text" id="entry-input" placeholder="Add an option..." class="flex-grow bg-gray-700 border-2 border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition">
+                <button type="submit" id="add-button" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-2 rounded-lg transition shadow-md hover:shadow-lg">Add</button>
+            </form>
+
+            <!-- Entries List -->
+            <div id="entries-list-container">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-semibold">Options (<span id="entry-count">0</span>)</h2>
+                    <button id="reset-button" class="text-sm text-red-400 hover:text-red-500 transition">Reset</button>
+                </div>
+                <ul id="entries-list" class="bg-gray-900/50 p-4 rounded-md h-64 overflow-y-auto border border-gray-700">
+                    <!-- Entries will be dynamically added here -->
+                </ul>
+                <p id="min-entries-msg" class="text-amber-400 text-sm mt-2 hidden">Add at least one option to spin.</p>
+            </div>
+        </div>
+
+        <!-- Right Panel: Wheel -->
+        <div class="w-full lg:w-2/3 flex flex-col items-center justify-center relative pt-12 lg:pt-0">
+            <!-- Pointer -->
+            <div id="pointer" class="absolute top-0 lg:top-[-20px] z-10" style="left: calc(50% - 20px);">
+                <svg width="40" height="60" viewBox="0 0 40 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 60L0 20L20 0L40 20L20 60Z" fill="#22d3ee"/> <!-- cyan-400 -->
+                    <path d="M20 52L6 22L20 6L34 22L20 52Z" fill="#06b6d4"/> <!-- cyan-500 -->
+                </svg>
+            </div>
+
+            <!-- Wheel Container -->
+            <div id="wheel-container" class="relative w-full max-w-lg aspect-square">
+                <canvas id="wheel-canvas"></canvas>
+                <button id="spin-button" class="absolute inset-0 m-auto w-24 h-24 md:w-32 md:h-32 rounded-full border-4 border-gray-600 text-white font-black text-2xl z-10 flex items-center justify-center">
+                    SPIN
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Winner Modal -->
+    <div id="winner-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+        <div id="winner-modal-content" class="bg-gray-800 border border-cyan-500 rounded-2xl shadow-2xl p-8 text-center max-w-sm w-full">
+            <h2 class="text-2xl font-bold text-gray-400 mb-2">The Winner Is...</h2>
+            <p id="winner-text" class="text-4xl font-black text-cyan-400 my-6 break-words"></p>
+            <button id="close-modal-button" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg transition shadow-md hover:shadow-lg">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const canvas = document.getElementById('wheel-canvas');
+            const ctx = canvas.getContext('2d');
+            const spinButton = document.getElementById('spin-button');
+            const entryForm = document.getElementById('entry-form');
+            const entryInput = document.getElementById('entry-input');
+            const entriesList = document.getElementById('entries-list');
+            const entryCount = document.getElementById('entry-count');
+            const resetButton = document.getElementById('reset-button');
+            const minEntriesMsg = document.getElementById('min-entries-msg');
+            const winnerModal = document.getElementById('winner-modal');
+            const winnerModalContent = document.getElementById('winner-modal-content');
+            const winnerText = document.getElementById('winner-text');
+            const closeModalButton = document.getElementById('close-modal-button');
+
+            // State
+            let options = [];
+            let currentRotation = 0;
+            let isSpinning = false;
+            
+            // A vibrant color palette for the wheel slices
+            const colors = [
+                "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e",
+                "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1",
+                "#8b5cf6", "#a855f7", "#d946ef", "#ec4899", "#f43f5e"
+            ];
+
+            // Set canvas size
+            function resizeCanvas() {
+                const container = document.getElementById('wheel-container');
+                const size = Math.min(container.clientWidth, container.clientHeight);
+                canvas.width = size;
+                canvas.height = size;
+                drawWheel();
+            }
+
+            // Draw the entire wheel
+            function drawWheel() {
+                const numOptions = options.length;
+                if (numOptions === 0) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    return;
+                }
+                const sliceAngle = 2 * Math.PI / numOptions;
+                const radius = canvas.width / 2;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.translate(radius, radius);
+                ctx.rotate(currentRotation);
+
+                // Draw slices
+                options.forEach((option, i) => {
+                    const angle = sliceAngle * i;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.arc(0, 0, radius, angle, angle + sliceAngle);
+                    ctx.closePath();
+                    ctx.fillStyle = colors[i % colors.length];
+                    ctx.fill();
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = '#1f2937'; // gray-800
+                    ctx.stroke();
+                });
+
+                // Draw text in a separate loop
+                options.forEach((option, i) => {
+                    ctx.save();
+                    const angle = sliceAngle * i + sliceAngle / 2;
+                    ctx.rotate(angle);
+                    ctx.textAlign = "center";
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = `bold ${Math.min(16, radius / 10)}px Inter`;
+                    ctx.shadowColor = "rgba(0,0,0,0.5)";
+                    ctx.shadowBlur = 3;
+                    ctx.fillText(option, radius * 0.75, 0);
+                    ctx.restore();
+                });
+
+                ctx.restore();
+            }
+            
+            // Update the list of entries displayed on the page
+            function updateEntriesList() {
+                entriesList.innerHTML = '';
+                options.forEach((option, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'text-gray-300 mb-1 flex justify-between items-center group';
+
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = `${index + 1}. ${option}`;
+                    textSpan.className = 'truncate pr-2';
+
+                    const deleteButton = document.createElement('button');
+                    deleteButton.className = 'ml-2 text-gray-500 hover:text-red-400 transition-colors';
+                    // SVG for the trash bin icon
+                    deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5m-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5M4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06m3 0a.5.5 0 0 0-1 0v8.5a.5.5 0 0 0 1 0zM8 4.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V5a.5.5 0 0 0-.5-.5"/></svg>`;
+                    
+                    deleteButton.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent any other parent events
+                        deleteEntry(index);
+                    });
+
+                    li.appendChild(textSpan);
+                    li.appendChild(deleteButton);
+                    entriesList.appendChild(li);
+                });
+                entryCount.textContent = options.length;
+
+                // Enable/disable spin button based on number of options
+                if (options.length > 0) {
+                    spinButton.disabled = false;
+                    minEntriesMsg.classList.add('hidden');
+                } else {
+                    spinButton.disabled = true;
+                    minEntriesMsg.classList.remove('hidden');
+                }
+            }
+
+            // Handle deleting an entry
+            function deleteEntry(indexToDelete) {
+                options.splice(indexToDelete, 1);
+                updateEntriesList();
+                drawWheel();
+            }
+
+            // Handle adding a new entry
+            function addEntry(e) {
+                e.preventDefault();
+                const newOption = entryInput.value.trim();
+                if (newOption) {
+                    options.push(newOption);
+                    entryInput.value = '';
+                    updateEntriesList();
+                    drawWheel();
+                }
+            }
+
+            // The main spin function
+            function spin() {
+                if (isSpinning || options.length === 0) return;
+
+                isSpinning = true;
+                spinButton.disabled = true;
+
+                let winnerIndex;
+                // --- THE RIGGING LOGIC ---
+                if (options.length > 3) {
+                    // Pick a random winner index from the allowed options (i.e., not the first three)
+                    winnerIndex = Math.floor(Math.random() * (options.length - 3)) + 3;
+                } else {
+                    // If 3 or fewer options, the spin is completely random and fair
+                    winnerIndex = Math.floor(Math.random() * options.length);
+                }
+                
+                const sliceAngle = 2 * Math.PI / options.length;
+                
+                // 1. Calculate the target angle on the wheel. We'll aim for the middle of the winning slice.
+                const targetAngleOnWheel = sliceAngle * (winnerIndex + 0.5);
+                
+                // 2. Calculate the final orientation of the wheel.
+                // The pointer is at the top (1.5 * PI or 270 degrees). We want the targetAngleOnWheel to align with it.
+                const targetOrientation = (1.5 * Math.PI) - targetAngleOnWheel;
+                
+                // 3. Add several full rotations for visual effect.
+                const randomRotations = (Math.floor(Math.random() * 5) + 5) * 2 * Math.PI;
+
+                // 4. Calculate the final rotation value for the animation.
+                const currentOrientation = currentRotation % (2 * Math.PI);
+                let adjustment = targetOrientation - currentOrientation;
+                
+                // Ensure we always spin forward by adding a full circle if the adjustment is negative.
+                if (adjustment < 0) {
+                    adjustment += 2 * Math.PI;
+                }
+                
+                const finalRotation = currentRotation + randomRotations + adjustment;
+
+                animateSpin(finalRotation, 7000, winnerIndex); // Spin for 7 seconds
+            }
+
+            // Animation logic using requestAnimationFrame and easing
+            function animateSpin(targetRotation, duration, winnerIndex) {
+                let startTime = null;
+                const initialRotation = currentRotation;
+
+                function step(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const elapsed = timestamp - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const easedProgress = 1 - Math.pow(1 - progress, 4);
+
+                    currentRotation = initialRotation + (targetRotation - initialRotation) * easedProgress;
+                    drawWheel();
+
+                    if (progress < 1) {
+                        requestAnimationFrame(step);
+                    } else {
+                        currentRotation %= (2 * Math.PI);
+                        isSpinning = false;
+                        if(options.length > 0) spinButton.disabled = false;
+                        showWinner(options[winnerIndex]);
+                    }
+                }
+
+                requestAnimationFrame(step);
+            }
+
+            // Show the winner in a modal
+            function showWinner(winner) {
+                winnerText.textContent = winner;
+                winnerModal.classList.remove('hidden');
+                winnerModal.classList.add('flex');
+                winnerModalContent.classList.add('modal-fade-in');
+            }
+
+            // Hide the winner modal
+            function hideWinner() {
+                winnerModal.classList.add('hidden');
+                winnerModal.classList.remove('flex');
+                winnerModalContent.classList.remove('modal-fade-in');
+            }
+
+            // Reset the wheel to its initial state
+            function resetWheel() {
+                options = [];
+                currentRotation = 0;
+                isSpinning = false;
+                updateEntriesList();
+                drawWheel();
+                hideWinner();
+            }
+
+            // Event Listeners
+            entryForm.addEventListener('submit', addEntry);
+            spinButton.addEventListener('click', spin);
+            resetButton.addEventListener('click', resetWheel);
+            closeModalButton.addEventListener('click', hideWinner);
+            window.addEventListener('resize', resizeCanvas);
+
+            // Initial Setup
+            resizeCanvas();
+            updateEntriesList();
+        });
+    </script>
+</body>
+</html>
